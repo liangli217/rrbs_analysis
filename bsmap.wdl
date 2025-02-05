@@ -1,10 +1,8 @@
 task fastqc{
     #inputs from workflow config, or upstream task if preprocessing done
     File fastq1
-    File fastq2
     String? fastq_suffix = '.fastq.gz'
     String? fastq1_prefix = basename(fastq1, '.fastq.gz')
-    String? fastq2_prefix = basename(fastq2, fastq_suffix)
 
     String? fastqc_args = ""
 
@@ -14,7 +12,7 @@ task fastqc{
     Int? threads = "1"
     Int? disk_size_buffer = "10"
     Int? disk_scaler = "1"
-    Int? disk_size_gb = ceil( (size(fastq1, "G") + size(fastq2, "G")) * disk_scaler) + disk_size_buffer
+    Int? disk_size_gb = ceil( (size(fastq1, "G") ) * disk_scaler) + disk_size_buffer
     Int? num_preempt = "4"
 
     command {
@@ -26,7 +24,7 @@ task fastqc{
         --outdir . \
           --threads ${threads} \
           ${fastqc_args} \
-          ${fastq1} ${fastq2}
+          ${fastq1}
 
     }
     runtime {
@@ -38,9 +36,7 @@ task fastqc{
     }
     output {
         File fq1_zip="${fastq1_prefix}_fastqc.zip"
-        File fq2_zip="${fastq2_prefix}_fastqc.zip"
         File fq1_html="${fastq1_prefix}_fastqc.html"
-        File fq2_html="${fastq2_prefix}_fastqc.html"
         File monitoring_log="monitoring.log"
     }
 }
@@ -48,7 +44,6 @@ task fastqc{
 task trim_fastqs{
     #inputs from workflow config
     File fastq1
-    File fastq2
     String sample_id #for log output
 
     String? trim_args=""
@@ -60,7 +55,7 @@ task trim_fastqs{
     Int? threads = "9"
     Int? disk_size_buffer = "10"
     Int? disk_scaler = "3" #trim_galore makes 2 copies
-    Int? disk_size_gb = ceil( (size(fastq1, "G") + size(fastq2, "G")) * disk_scaler) + disk_size_buffer
+    Int? disk_size_gb = ceil( size(fastq1, "G")  * disk_scaler) + disk_size_buffer
     Int? num_preempt = "4"
 
     command {
@@ -70,9 +65,8 @@ task trim_fastqs{
         #4 (read) + 4 (write) + 4 (Cutadapt) + 2 (extra Cutadapt) + 1 (Trim Galore) = 15
         #2 (read) + 2 (write) + 2 (Cutadapt) + 2 (extra Cutadapt) + 1 (Trim Galore) = 9
         #See: https://github.com/FelixKrueger/TrimGalore/blob/master/Docs/Trim_Galore_User_Guide.md
-        trim_galore --paired --gzip ${trim_cores_arg} ${trim_args} ${fastq1} ${fastq2}
-        mv *_val_1.*.gz ${sample_id}_1.trm.fastq.gz
-        mv *_val_2.*.gz ${sample_id}_2.trm.fastq.gz
+        trim_galore --gzip ${trim_cores_arg} ${trim_args} ${fastq1}
+        mv *_val_1.*.gz ${sample_id}.trm.fastq.gz
 
         cat *_trimming_report.txt > "${sample_id}.fastq.trimming.log"
     }
@@ -85,8 +79,7 @@ task trim_fastqs{
     	    preemptible: "${num_preempt}"
     }
     output {
-	    File fastq1_trimmed = "${sample_id}_1.trm.fastq.gz"
-	    File fastq2_trimmed = "${sample_id}_2.trm.fastq.gz"
+	    File fastq1_trimmed = "${sample_id}.trm.fastq.gz"
         File trimming_log = "${sample_id}.fastq.trimming.log"
         File monitoring_log="monitoring.log"
     }
@@ -95,12 +88,10 @@ task trim_fastqs{
 task trim_diversity_adapters {
   #inputs from workflow config, or upstream task if preprocessing done
   File fastq1
-  File fastq2
   String? fastq_suffix = '.fastq'
   String? zip_suffix = '.gz'
   String? full_suffix = fastq_suffix + zip_suffix
   String? fastq1_prefix = basename(fastq1, zip_suffix)
-  String? fastq2_prefix = basename(fastq2, zip_suffix)
 
   String? trim_suff = ".trmDivAdp"
 
@@ -112,7 +103,7 @@ task trim_diversity_adapters {
   Int? threads = "1"
   Int? disk_size_buffer = "10"
   Int? disk_scaler = "2"
-  Int? disk_size_gb = ceil( (size(fastq1, "G") + size(fastq2, "G")) * disk_scaler) + disk_size_buffer
+  Int? disk_size_gb = ceil( (size(fastq1, "G") ) * disk_scaler) + disk_size_buffer
   Int? num_preempt = "4"
 
   command {
@@ -120,14 +111,11 @@ task trim_diversity_adapters {
 
       mkdir workdir
       new_fastq1=workdir/$(basename ${fastq1})
-      new_fastq2=workdir/$(basename ${fastq2})
       mv ${fastq1} $new_fastq1
-      mv ${fastq2} $new_fastq2
 
-      python2 /src/trimRRBSdiversityAdaptCustomers.py -1 $new_fastq1 -2 $new_fastq2 ${trim_div_args}
+      python2 /src/trimRRBSdiversityAdaptCustomers.py -1 $new_fastq1  ${trim_div_args}
 
       mv workdir/"${fastq1_prefix}_trimmed.fq${zip_suffix}" "${fastq1_prefix}${trim_suff}${full_suffix}"
-      mv workdir/"${fastq2_prefix}_trimmed.fq${zip_suffix}" "${fastq2_prefix}${trim_suff}${full_suffix}"
   }
   runtime {
       docker: "${docker}"
@@ -138,7 +126,6 @@ task trim_diversity_adapters {
   }
   output {
       File fastq1_divtrim="${fastq1_prefix}${trim_suff}${full_suffix}"
-      File fastq2_divtrim="${fastq2_prefix}${trim_suff}${full_suffix}"
       File monitoring_log="monitoring.log"
   }
 }
@@ -179,7 +166,6 @@ task bamstat {
 
 task bsmap{
     File fastq1
-    File fastq2
     String sample_id
     File reference_fa
     Int? seed_size="12" #default=12(RRBS mode), 16(WGBS mode). min=8, max=16.
@@ -202,7 +188,7 @@ task bsmap{
     Int? threads = "24"
     Int? disk_size_buffer = "10"
     Int? disk_scaler = "2"
-    Int? disk_size_gb = ceil( (size(fastq1, "G") + size(fastq2, "G")) * disk_scaler) + disk_size_buffer
+    Int? disk_size_gb = ceil( size(fastq1, "G")  * disk_scaler) + disk_size_buffer
     Int? num_preempt = "4"
 
     command {
@@ -219,7 +205,6 @@ task bsmap{
               -p ${threads} \
               -d ${reference_fa} \
               -a ${fastq1} \
-              -b ${fastq2} \
               -o ${sample_id}.bsmap.bam 2> ${sample_id}.bsmap.stderr.log
 
             /src/parse_bsmap_report.py -s ${sample_id} -f ${sample_id}.bsmap.stderr.log -o ${sample_id}.bsmap.stats.tsv
@@ -470,9 +455,7 @@ task mcall {
 task multiqc {
     String sample_id
     File fastq1_fastqc
-    File fastq2_fastqc
     File? fastq1_trimmed_fastqc
-    File? fastq2_trimmed_fastqc
     File? trimming_log
     File? bam_markdups_report
     String? multiqc_args = ""
@@ -483,7 +466,7 @@ task multiqc {
     Int? threads = "1"
     Int? disk_size_buffer = "10"
     Int? disk_scaler = "1"
-    Int? disk_size_gb = ceil( (size(fastq1_fastqc, "G") + size(fastq2_fastqc, "G") + size(fastq1_trimmed_fastqc, "G") + size(fastq2_trimmed_fastqc, "G")) * disk_scaler) + disk_size_buffer
+    Int? disk_size_gb = ceil( (size(fastq1_fastqc, "G") + size(fastq1_trimmed_fastqc, "G") ) * disk_scaler) + disk_size_buffer
     Int? num_preempt = "4"
 
     command {
@@ -493,7 +476,6 @@ task multiqc {
         mkdir $multiqc_dir
 
         mv ${fastq1_fastqc} $multiqc_dir/
-        mv ${fastq2_fastqc} $multiqc_dir/
 
         if [ -n "${trimming_log}" ]; then
             mv ${trimming_log} $multiqc_dir/
@@ -501,10 +483,6 @@ task multiqc {
 
         if [ -n "${fastq1_trimmed_fastqc}" ]; then
             mv ${fastq1_trimmed_fastqc} $multiqc_dir/
-        fi
-
-        if [ -n "${fastq2_trimmed_fastqc}" ]; then
-            mv ${fastq2_trimmed_fastqc} $multiqc_dir/
         fi
 
         if [ -n "${bam_markdups_report}" ]; then
@@ -532,10 +510,9 @@ task multiqc {
     }
 }
 
-workflow bsmap_to_mcall_PE {
+workflow bsmap_to_mcall_SE {
     String sample_id
     File fastq1
-    File fastq2
     File reference_fa #for bsmap, mcall
     File reference_sizes #for bsmap, mcall
 
@@ -660,7 +637,6 @@ workflow bsmap_to_mcall_PE {
       call trim_fastqs {
           input:
               fastq1=fastq1,
-              fastq2=fastq2,
               sample_id=sample_id,
               docker = select_first([docker_trim, docker]),
               mem = trim_fastqs_mem,
@@ -673,7 +649,6 @@ workflow bsmap_to_mcall_PE {
           call trim_diversity_adapters {
               input:
                   fastq1 = trim_fastqs.fastq1_trimmed,
-                  fastq2 = trim_fastqs.fastq2_trimmed,
                   fastq_suffix = trim_div_adapts_fastq_suffix,
                   zip_suffix = trim_div_adapts_zip_suffix,
                   trim_suff = trim_div_adapts_suff,
@@ -689,12 +664,10 @@ workflow bsmap_to_mcall_PE {
   }
 
   File? fastq1_trimmed = select_first([trim_diversity_adapters.fastq1_divtrim, trim_fastqs.fastq1_trimmed])
-  File? fastq2_trimmed = select_first([trim_diversity_adapters.fastq2_divtrim, trim_fastqs.fastq2_trimmed])
 
     call fastqc as fastqc_raw {
         input:
             fastq1 = fastq1,
-            fastq2 = fastq2,
             fastq_suffix = fastq_suffix,
             fastqc_args = fastqc_args_raw,
             docker = docker,
@@ -707,7 +680,6 @@ workflow bsmap_to_mcall_PE {
     call fastqc as fastqc_trimmed {
         input:
             fastq1 = fastq1_trimmed,
-            fastq2 = fastq2_trimmed,
             docker = docker,
             mem = fastqc_mem,
             threads = fastqc_threads,
@@ -719,7 +691,6 @@ workflow bsmap_to_mcall_PE {
     call bsmap{
         input:
             fastq1=select_first([fastq1_trimmed, fastq1]),
-            fastq2=select_first([fastq2_trimmed, fastq2]),
             sample_id=sample_id,
             reference_fa=reference_fa,
             seed_size=bsmap_seed_size,
@@ -829,9 +800,7 @@ File? markdup_bam_index = select_first([markduplicates.bam_md_index, markdup_umi
         input:
             sample_id = sample_id,
             fastq1_fastqc = fastqc_raw.fq1_zip,
-            fastq2_fastqc = fastqc_raw.fq2_zip,
             fastq1_trimmed_fastqc = fastq1_trimmed,
-            fastq2_trimmed_fastqc = fastq2_trimmed,
             trimming_log = trim_fastqs.trimming_log,
             bam_markdups_report = markduplicates.bam_md_metrics,
             multiqc_args = multiqc_args,
