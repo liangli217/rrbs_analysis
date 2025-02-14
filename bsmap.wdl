@@ -227,7 +227,53 @@ task bsmap{
     }
 }
 
+task markdup_umi {
+  File bam_file
+  File umi_index_fastq
+  String? dedup_umi_args = "--paired-end --start 6 --length 6 -T temp"
 
+  String? file_pref = basename(bam_file, '.bam')
+  String? bam_outsuff = ".sorted.md_umi.bam"
+
+  #runtime inputs
+  String? docker = "gcr.io/broad-cga-bknisbac-wupo1/nudup:1.0"
+  Int? mem = "8"
+  Int? threads = "4"
+  Int? disk_size_buffer = "10"
+  Int? disk_scaler = "3"
+  Int? disk_size_gb = ceil( size(bam_file, "G") * disk_scaler) + disk_size_buffer
+  Int? num_preempt = "4"
+
+  command {
+      /src/monitor_script.sh > monitoring.log &
+
+      mkdir temp
+
+      python2 /src/nudup.py ${dedup_umi_args} \
+        -f ${umi_index_fastq} \
+        --out ${file_pref} \
+        ${bam_file}
+
+        mv ${file_pref}.sorted.markdup.bam ${file_pref}${bam_outsuff}
+        rm ${file_pref}.sorted.dedup.bam #I didn't need dedup file
+
+        samtools index -@ ${threads} ${file_pref}${bam_outsuff}
+
+  }
+  runtime {
+      docker: "${docker}"
+      memory: "${mem}GB"
+      cpu: "${threads}"
+      disks: "local-disk ${disk_size_gb} HDD"
+      preemptible: "${num_preempt}"
+  }
+  output {
+      File markdup_bam = "${file_pref}${bam_outsuff}"
+      File markdup_bai = "${file_pref}${bam_outsuff}.bai"
+      File markdup_log = "${file_pref}_dup_log.txt"
+      File monitoring_log="monitoring.log"
+  }
+}
 
 task sort_bam {
     File bam_file
